@@ -1,0 +1,238 @@
+{
+  "name": "My workflow",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "cb66abc7-a6fc-4fa8-ad97-d00530879e38",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1HdYvx2qwbw4U3lflkG21lY2Z6Y2YWMoUqe-7n_vu9Jg",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1905447273,
+          "mode": "list",
+          "cachedResultName": "Taulukko1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1HdYvx2qwbw4U3lflkG21lY2Z6Y2YWMoUqe-7n_vu9Jg/edit#gid=1905447273"
+        },
+        "options": {
+          "dataLocationOnSheet": {
+            "values": {
+              "rangeDefinition": "specifyRange"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        224,
+        0
+      ],
+      "id": "e0118b06-0d4d-409b-84b0-37f3e1bebf68",
+      "name": "Get row(s) in sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "Xdz1s05KMzTd7LoW",
+          "name": "Google Sheets OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://v6.exchangerate-api.com/v6/fc2879bab97f3db7aa4a81c2/latest/EUR",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        448,
+        0
+      ],
+      "id": "fe3fdc35-4075-45ba-8cee-c9230a49564c",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $('Get row(s) in sheet').all().map(item => item.json);\nconst rates = $('HTTP Request').first().json.conversion_rates;\n\nconst validAlvRates = [0, 10, 13.5, 25.5];\nconst errors = [];\nconst supplierMap = {};\nconst seen = [];\n\nrows.forEach((row, i) => {\n  const currency = row['Valuutta'] || 'EUR';\n  const rate = currency === 'EUR' ? 1 : (1 / rates[currency]);\n\n  if (!rate) {\n    errors.push(`Rivi ${i+2} (${row['Toimittaja']}): Tuntematon valuutta ${currency}`);\n    seen.push({ toimittaja: row['Toimittaja'], nettoEur: 0, pvm: new Date(row['Päivämäärä']), rivi: i+2 });\n    return;\n  }\n\n  const nettoEur = Math.round(parseFloat(row['Netto']) * rate * 100) / 100;\n  const alvRate = parseFloat(row['ALV %']);\n  const alvSummaEur = Math.round(parseFloat(row['ALV-summa']) * rate * 100) / 100;\n  const laskettuAlv = Math.round(nettoEur * (alvRate / 100) * 100) / 100;\n  \n  // Parse date properly - handle both YYYY-MM-DD and DD.MM.YYYY formats\n  let laskuPvm;\n  const dateStr = String(row['Päivämäärä']);\n  if (dateStr.includes('-')) {\n    laskuPvm = new Date(dateStr);\n  } else if (dateStr.includes('.')) {\n    const parts = dateStr.split('.');\n    laskuPvm = new Date(parts[2], parts[1] - 1, parts[0]);\n  } else {\n    laskuPvm = new Date(dateStr);\n  }\n\n  // Tarkistus 1: ALV-% sallittu\n  if (!validAlvRates.includes(alvRate)) {\n    errors.push(`Rivi ${i+2} (${row['Toimittaja']}): Virheellinen ALV-% ${alvRate}`);\n  }\n\n  // Tarkistus 2: ALV-summa täsmää\n  if (Math.abs(laskettuAlv - alvSummaEur) > 0.05) {\n    errors.push(`Rivi ${i+2} (${row['Toimittaja']}): ALV-summa ei täsmää — laskettu ${laskettuAlv}€, ilmoitettu ${alvSummaEur}€`);\n  }\n\n  // Tarkistus 3: Duplikaattiriski - tarkista ENNEN lisäämistä seen-listaan\n  for (let j = 0; j < seen.length; j++) {\n    const s = seen[j];\n    if (s.toimittaja === row['Toimittaja']) {\n      const amountDiff = Math.abs(s.nettoEur - nettoEur);\n      // Use 1% tolerance or 5 EUR, whichever is larger\n      const tolerance = Math.max(5, nettoEur * 0.01);\n      if (amountDiff <= tolerance) {\n        // Calculate days difference for reporting (no longer filtering by it)\n        const daysDiff = Math.abs((laskuPvm - s.pvm) / (1000 * 60 * 60 * 24));\n        const pvmStr = s.pvm.toISOString().split('T')[0];\n        const currPvmStr = laskuPvm.toISOString().split('T')[0];\n        errors.push(`Rivi ${i+2} (${row['Toimittaja']}): Mahdollinen duplikaatti — sama summa ${nettoEur.toFixed(2)}€ (ero ${amountDiff.toFixed(2)}€) ${daysDiff.toFixed(0)} päivän välillä (aiempi rivi ${s.rivi}, pvm ${pvmStr} vs ${currPvmStr})`);\n        break;\n      }\n    }\n  }\n\n  seen.push({ toimittaja: row['Toimittaja'], nettoEur, pvm: laskuPvm, rivi: i+2 });\n\n  // Aggregointi toimittajittain\n  if (!supplierMap[row['Toimittaja']]) {\n    supplierMap[row['Toimittaja']] = { laskuja: 0, yhtEur: 0, virheet: 0 };\n  }\n  supplierMap[row['Toimittaja']].laskuja++;\n  supplierMap[row['Toimittaja']].yhtEur = Math.round((supplierMap[row['Toimittaja']].yhtEur + nettoEur) * 100) / 100;\n});\n\nreturn [{\n  json: {\n    ok: errors.length === 0,\n    virheet: errors,\n    toimittajat: supplierMap,\n    tarkistettu_riveja: rows.length,\n    kaytetyt_kurssit: {\n      USD: (1 / rates['USD']).toFixed(4),\n      GBP: (1 / rates['GBP']).toFixed(4),\n      SEK: (1 / rates['SEK']).toFixed(4)\n    },\n    kurssi_aika: new Date().toISOString()\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        0
+      ],
+      "id": "ae9ce463-a66b-41ed-80e1-80192509390a",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1HdYvx2qwbw4U3lflkG21lY2Z6Y2YWMoUqe-7n_vu9Jg",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Tarkistusraportti",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1HdYvx2qwbw4U3lflkG21lY2Z6Y2YWMoUqe-7n_vu9Jg/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Ajettu": "={{new Date().toISOString()}}",
+            "Tarkistettu riviä": "={{$json.tarkistettu_riveja}}",
+            "Virheiden määrä": "={{$json.virheet.length}}",
+            "Virheet": "={{$json.virheet.join(' | ')}}",
+            "Valuuttakurssit": "={{'Kurssiaika ' + $json.kurssi_aika + ' USD=' + $json.kaytetyt_kurssit.USD + ' GBP=' + $json.kaytetyt_kurssit.GBP + ' SEK=' + $json.kaytetyt_kurssit.SEK}}"
+          },
+          "matchingColumns": [
+            "Ajettu"
+          ],
+          "schema": [
+            {
+              "id": "Ajettu",
+              "displayName": "Ajettu",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Tarkistettu riviä",
+              "displayName": "Tarkistettu riviä",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Valuuttakurssit",
+              "displayName": "Valuuttakurssit",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Virheiden määrä",
+              "displayName": "Virheiden määrä",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Virheet",
+              "displayName": "Virheet",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        880,
+        0
+      ],
+      "id": "52819fe8-683e-4fd3-983a-0d9032d7b387",
+      "name": "Append row in sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "Xdz1s05KMzTd7LoW",
+          "name": "Google Sheets OAuth2 API"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Get row(s) in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get row(s) in sheet": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "e0f5e815-300c-4d7e-8280-863a4b62f8f2",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "001982b6f64018f96f5bb66cfd8165828886671f7eac26a324af6b7c0d01ab00"
+  },
+  "id": "SquSN1qYwUE5IPN2",
+  "tags": []
+}
