@@ -159,7 +159,7 @@ Alkuperäinen suunnitelma käytti Make-alustaa, mutta JavaScript-suoritusympäri
 
 ---
 
-## Tekijä
+## Tekijä Mira Vallenius
 
 Rakennettu portfolioprojektina osoittamaan taloushallinnon automaatio-osaamista:
 - Low-code automaatioalustan (n8n) käyttö
