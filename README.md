@@ -148,14 +148,12 @@ Huom: valuutta ei yksinään riitä tunnistukseen — esim. ruotsalainen toimitt
 
 ## Toteutus
 
-Projekti toteutettiin **2 tunnissa 11 minuutissa** (18:12–20:23) sisältäen:
+Projekti toteutettiin alle kahdessa tunnissa sisältäen:
 - Testidatan suunnittelu ja virheiden piilottaminen
 - n8n-työnkulun rakentaminen (Google Sheets + HTTP Request + Code + Sheets raportti)
 - JavaScript-validointilogiikan kehitys ja debuggaus
 - Valuuttamuunnoksen integrointi reaaliaikaiseen API:in
 - Raportointihistorian rakentaminen
-
-Alkuperäinen suunnitelma käytti Make-alustaa, mutta JavaScript-suoritusympäristö vaati maksullisen tilin — projekti siirrettiin n8n:ään jossa Code-noodi on ilmainen ja toiminnaltaan vastaava.
 
 ---
 
@@ -165,4 +163,4 @@ Rakennettu portfolioprojektina osoittamaan taloushallinnon automaatio-osaamista:
 - Low-code automaatioalustan (n8n) käyttö
 - REST API -integraatiot
 - JavaScript-validointilogiikka
-- Taloushallinnon prosessiymmärrys (ALV-lainsäädäntö 2026)
+- Taloushallinnon prosessiymmärrys 
